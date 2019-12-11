@@ -11,7 +11,8 @@ def diff((x1, y1), (x2, y2))
   [x1 - x2, y1 - y2]
 end
 
-# Turn [4, 2] into [2, 1], and [9, 3] into [3, 1]
+# Turn [4, 2] into [2, 1], and [9, 3] into [3, 1] - this means that we treat all vectors in the
+# same line as equal.
 def normalise(x, y)
   gcd = x.gcd(y)
   gcd = 1 if gcd.zero?
@@ -29,7 +30,8 @@ end
 input = $stdin.read
 coords = asteroid_coords(input)
 
-_best_coord, best_count =
+best_coord, best_count =
   coords.map { |coord| [coord, visible_count(coords, coord)] }.max_by { |_, c| c }
 
+p best_coord
 puts best_count
