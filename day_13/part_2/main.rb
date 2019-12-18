@@ -6,22 +6,28 @@ def read_instructions
   File.read(ARGV[0]).split(',').map(&:to_i)
 end
 
-class State
+class ComputerState
   ADDRESS_MODES = {
     0 => :position,
     1 => :immediate,
     2 => :relative
   }
 
-  def initialize(instructions, read, write)
+  attr_accessor :clock_delay
+  attr_reader :ops
+
+  def initialize(instructions, read, write, clock_delay: 0)
     @memory = instructions.each_with_index.map { |x, i| [i, x] }.to_h
     @read = read
     @write = write
     @pc = 0
+    @ops = 0
     @relative_base = 0
+    @clock_delay = clock_delay
   end
 
   def resolve_instruction
+    @ops += 1
     input = @memory.fetch(@pc).to_s
 
     n = [input.length, 2].min
@@ -104,9 +110,7 @@ class State
   end
 end
 
-def run_program(instructions, read, write)
-  state = State.new(instructions, read, write)
-
+def run_program(state)
   loop do
     op, arg_io_types, address_modes = state.resolve_instruction
 
@@ -133,6 +137,8 @@ def run_program(instructions, read, write)
     else raise "Unhandled op: #{op}!"
     end
 
+    sleep(state.clock_delay)
+
     state.incr_pc(arg_io_types.size + 1)
   end
 end
@@ -145,22 +151,37 @@ class GameState
   }.freeze
 
   TILES = {
-    0 => ' ',
-    1 => '#',
-    2 => '%',
-    3 => '-',
-    4 => '.',
+    EMPTY = 0 => ' ',
+    WALL = 1 => '#',
+    BLOCK = 2 => '%',
+    PADDLE = 3 => '-',
+    BALL = 4 => '.',
   }.freeze
+
+  attr_reader :ball_pos, :paddle_pos
 
   def initialize
     @cells = {}
     @score = 0
     @joystick_position = :neutral
-    @cell_sets = 0
+    @ball_pos = [0, 0]
+    @paddle_pos = [0, 0]
   end
 
   def joystick_position
     JOYSTICK_POS.fetch(@joystick_position)
+  end
+
+  def joystick_left
+    @joystick_position = :left
+  end
+
+  def joystick_right
+    @joystick_position = :right
+  end
+
+  def joystick_neutral
+    @joystick_position = :neutral
   end
 
   def score
@@ -172,13 +193,17 @@ class GameState
   end
 
   def set_cell(x, y, tile_id)
-    @cell_sets += 1
     @cells[y] ||= {}
     @cells[y][x] = tile_id
+
+    case tile_id
+    when BALL then @ball_pos = [x, y]
+    when PADDLE then @paddle_pos = [x, y]
+    end
   end
 
   def draw
-    yield "Score: #{score}. Cell sets: #{@cell_sets}"
+    yield "Score: #{score}."
 
     @cells.map do |y, row|
       yield row.values.map { |v| TILES.fetch(v) }.join
@@ -186,72 +211,56 @@ class GameState
   end
 end
 
-input = Queue.new
-output = Queue.new
-display_events = Queue.new
+computer_output = Queue.new
 
 instructions = read_instructions.tap { |i| i[0] = 2 }
 
 game_state = GameState.new
 
-# computer = Thread.new {
-#   run_program(instructions.dup, proc { game_state.joystick_position }, ->(v) { output << v })
-# }
+computer_state = ComputerState.new(
+  instructions.dup,
+  proc { game_state.joystick_position },
+  ->(v) { computer_output << v },
+  clock_delay: 1 / 75_000.0,
+)
+computer = Thread.new { run_program(computer_state) }
 
-computer = Thread.new {
-  (1..2).each do |v|
-    (0..20).each do |col|
-      (0..10).each do |row|
-        output << col
-        output << row
-        output << v
-      end
-    end
-  end
-}
-
-game = Thread.new do
-  count = 0
-
+game_state_updater = Thread.new do
   loop do
-    x = output.pop
-    y = output.pop
-    block = output.pop
+    x = computer_output.pop
+    y = computer_output.pop
+    block = computer_output.pop
 
     if x == -1 && y.zero?
       game_state.set_score(block)
     else
       game_state.set_cell(x, y, block)
+
+      case game_state.ball_pos[0] <=> game_state.paddle_pos[0]
+      when 1 then game_state.joystick_right
+      when -1 then game_state.joystick_left
+      else game_state.joystick_neutral
+      end
     end
-
-    count += 1
-
-    display_events << count
   end
 end
 
 display = Thread.new do
   Curses.init_screen
   begin
-    nb_lines = Curses.lines
-    nb_cols = Curses.cols
-
     win = Curses.stdscr
 
     loop do
-      event = display_events.pop
-      sleep 0.1
-      win.clear
-      game_state.draw do |line|
-        win << line
-        win << "\n"
-      end
+      win.erase
+      win << game_state.to_enum(:draw).to_a.join("\n")
       win.refresh
+
+      sleep(1 / 60.0)
     end
   ensure
     Curses.close_screen
   end
 end
 
-while computer.status || display.status
-end
+computer.join
+display.join
