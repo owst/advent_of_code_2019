@@ -1,48 +1,67 @@
+require 'set'
 require 'awesome_print'
 
-def parse(input = nil)
-  input ||= $stdin.read
-  input.split("\n").map do |line|
-    left, right = line.split(" => ")
+Node = Struct.new(:weight, :name) do
+  def self.parse(str)
+    w, n = str.split(" ")
 
-    parse_side = ->(side) { n, l = side.split(" "); [n.to_i, l] }
-
-    [left.split(",").map { |l| parse_side.call(l) }, parse_side.call(right)]
+    new(w.to_i, n)
   end
 end
 
-res = parse(<<~MSG)
-  10 ORE => 10 A
-  1 ORE => 1 B
-  7 A, 1 B => 1 C
-  7 A, 1 C => 1 D
-  7 A, 1 D => 1 E
-  7 A, 1 E => 1 FUEL
-MSG
+def parse_reactions(input = nil)
+  input ||= $stdin.read
+  input.split("\n").map do |line|
+    targets, source = line.split(" => ")
 
-# A => [10, [10, ORE]]
-# B => [1, [1, ORE]]
-# C => [1, [7, A], [1, B]]
-# D => [1, [7, A], [1, C]]
-# E => [1, [7, A], [1, D]]
-# FUEL => [1, [7, A], [1, E]]
+    [Node.parse(source), targets.split(",").map(&Node.method(:parse))]
+  end.to_h
+end
 
-lookup = res.map do |inputs, (output_count, output_name)|
-  [output_name, [output_count, inputs]]
-end.to_h
+reactions = parse_reactions
 
-def go(lookup, name, repeat = 1)
-  count, inputs = lookup.fetch(name)
+def topological_order_each(edges)
+  return to_enum(__method__, edges) unless block_given?
 
-  inputs.map do |input_count, input_name|
-    if input_name == "ORE"
-      [[]]
-    else
-      go(lookup, input_name, input_count).map do |x|
-        x * input_count
+  in_edges = edges.flat_map do |source_name, (_, targets)|
+    targets.map { |target| [target.name, source_name] }
+  end.group_by(&:first).transform_values { |es| es.map { |e| e[1] } }
+
+  to_visit = edges.keys.reject { |n| in_edges.key?(n) }
+
+  until to_visit.empty?
+    node = to_visit.shift
+
+    yield node
+
+    next unless edges.key?(node)
+
+    edges.fetch(node)[1].each do |target|
+      if in_edges[target.name].tap { |ie| ie.delete(node) }.empty?
+        to_visit << target.name
+        in_edges.delete(target.name)
       end
     end
   end
 end
 
-p go(lookup, "FUEL")
+by_name = reactions.map do |source, targets|
+  [source.name, [source, targets]]
+end.to_h
+
+res = topological_order_each(by_name).each_with_object({}) do |node_name, node_counts|
+  if by_name.key?(node_name)
+    source, targets = by_name.fetch(node_name)
+    node_count = node_counts.fetch(node_name, 1)
+
+    edge_count = (node_count.to_f / source.weight).ceil
+
+    targets.map do |target|
+      node_counts[target.name] ||= 0
+      node_counts[target.name] += target.weight * edge_count
+    end
+  end
+end
+
+
+puts res.fetch("ORE")
