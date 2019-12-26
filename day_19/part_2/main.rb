@@ -151,142 +151,51 @@ instructions = read_instructions
 read = proc { computer_input.pop }
 write = ->(v) { computer_output << v }
 
-# computer = Thread.new do
-#   loop do
-#     run_program(ComputerState.new(instructions, read, write))
-#   end
-# end
-#
 computer = Thread.new do
-  str = <<~STR
-    #.......................................
-    .#......................................
-    ..##....................................
-    ...###..................................
-    ....###.................................
-    .....####...............................
-    ......#####.............................
-    ......######............................
-    .......#######..........................
-    ........########........................
-    .........#########......................
-    ..........#########.....................
-    ...........##########...................
-    ...........############.................
-    ............############................
-    .............#############..............
-    ..............##############............
-    ...............###############..........
-    ................###############.........
-    ................#################.......
-    .................########OOOOOOOOOO.....
-    ..................#######OOOOOOOOOO#....
-    ...................######OOOOOOOOOO###..
-    ....................#####OOOOOOOOOO#####
-    .....................####OOOOOOOOOO#####
-    .....................####OOOOOOOOOO#####
-    ......................###OOOOOOOOOO#####
-    .......................##OOOOOOOOOO#####
-    ........................#OOOOOOOOOO#####
-    .........................OOOOOOOOOO#####
-    ..........................##############
-    ..........................##############
-    ...........................#############
-    ............................############
-    .............................###########
-  STR
-
-  cells = str.split("\n").map(&:chars)
-
   loop do
-    x = computer_input.pop.to_i
-    y = computer_input.pop.to_i
-
-    computer_output << (cells[y][x] == '.' ? 0 : 1)
+    run_program(ComputerState.new(instructions, read, write))
   end
 end
 
-# Thread.new do
-#   (0...35).each do |y|
-#     (0...40).each do |x|
-#       computer_input << x
-#       computer_input << y
-
-#       print(computer_output.pop.to_i == 0 ? '.' : '#')
-#     end
-#     print "\n"
-#   end
-# end
-
-size = 10
+size = 100
 last_lines = []
 
 grid_updater = Thread.new do
-  y = -1
+  pulling = ->(x, y) do
+    computer_input << x
+    computer_input << y
 
-  until y == 30
-    y += 1
-
-    first_pulling_col = nil
-    pulling_count = 0
-
-    x = -1
-
-    loop do
-      x += 1
-
-      break if x > 40
-
-      computer_input << x
-      computer_input << y
-
-      if computer_output.pop.to_i == 1
-        first_pulling_col ||= x
-        pulling_count += 1
-      elsif pulling_count > 0 # We're out of the right hand side, may as well stop
-        break
-      end
-    end
-
-    last_lines.push [y, first_pulling_col, pulling_count]
-
-    # if last_lines.size > size
-    #   # last_lines.shift
-
-    #   _, last_col, last_width = last_lines.last
-
-    #   # break if last_lines.last(size).all? do |y, first_col, width|
-    #   #   first_col && last_col > first_col && width > (last_col - first_col) + size
-    #   # end
-    # end
+    computer_output.pop.to_i == 1
   end
+
+  initial_y_guess = size * 9
+
+  (initial_y_guess..Float::INFINITY).each do |y|
+    print "\rChecking #{y}"
+    _, previous_first_col, previous_last_col = last_lines.last
+
+    start_x = previous_first_col || y - 1
+    first_pulling_col = (start_x..Float::INFINITY).find { |x| pulling.call(x, y) }
+
+    next unless first_pulling_col
+
+    start_x = [previous_last_col, first_pulling_col].compact.max
+    last_pulling_col = (start_x..Float::INFINITY).take_while { |x| pulling.call(x, y) }.last
+
+    last_lines.push [y, first_pulling_col, last_pulling_col]
+
+    last_start = last_lines.last[1]
+
+    break if last_lines.size >= size && last_lines.last(size).all? { |_, prev_start, prev_end|
+      prev_start <= last_start && prev_end >= (last_start + size - 1)
+    }
+  end
+
+  y = last_lines[-100][0]
+  x = last_lines.last[1]
+
+  puts "\nFinished"
+  puts x * 10_000 + y
 end
 
-display = Thread.new do
-  Curses.init_screen
-  begin
-    win = Curses.stdscr
-    win.timeout = 0
-    win.keypad = true
-    Curses.curs_set(0)
-
-    loop do
-      win.erase
-
-      last_lines.each do |y, x, len|
-        win << [y, x, len].map(&:to_s).join(',') + "\n"
-      end
-
-      win << "Last line: " + last_lines[-1].to_s + "\n"
-
-      win.refresh
-
-      sleep(1 / 60.0)
-    end
-  ensure
-    Curses.close_screen
-  end
-end
-
-computer.join
-display.join
+grid_updater.join
