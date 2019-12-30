@@ -167,17 +167,6 @@ computer_state = ComputerState.new(
 computer = Thread.new { run_program(computer_state) }
 
 program_writer = Thread.new do
-  # ####
-  #  ###
-  # # ##
-  # ## #
-  # ###
-  # ##
-  #   ##
-  #  ##
-  # #  #
-  # #
-  #    #
   str = <<~STR
     NOT A T
     OR T J
@@ -187,11 +176,19 @@ program_writer = Thread.new do
     OR T J
 
     AND D J
-    WALK
+
+    NOT E T
+    NOT T T
+    OR H T
+
+    AND T J
+    RUN
   STR
 
   str.split("\n").reject { |a|
     ["", "--"].include?(a[0, 2])
+  }.tap { |ls|
+    puts "#{ls.size - 1} instructions"
   }.map { |l| l + "\n" }.join.chars.each { |c| computer_input << c.ord }
 end
 
@@ -200,8 +197,7 @@ program_writer.join
 display = Thread.new do
   loop do
     if computer_output.empty?
-      # puts "Waiting..."
-      sleep 0.5
+      sleep 0.1
       next
     end
 
@@ -211,8 +207,10 @@ display = Thread.new do
       print char.chr
     else
       puts "Result: #{char}"
+
       break
     end
   end
 end
+
 display.join
