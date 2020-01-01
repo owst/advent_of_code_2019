@@ -153,38 +153,67 @@ def run_program(state)
   end
 end
 
-NetworkComputer = Struct.new(:thread, :input_mutex, :input, :output_mutex, :output)
+NetworkComputer = Struct.new(:thread, :input, :output)
+
+class InputEnumerator
+  def initialize(address, queue)
+    @address = address
+    @queue = queue
+    @next = nil
+  end
+
+  def next
+    if @next
+      value = @next
+      @next = nil
+      value
+    elsif @queue.empty?
+      -1
+    else
+      current, @next = @queue.pop
+
+      current
+    end
+  end
+end
+
+class OutputEnumerator
+  def initialize(queue)
+    @queue = queue
+    @pending = []
+  end
+
+  def <<(value)
+    if @pending.size == 2
+      address, x = @pending
+      y = value
+      @pending = []
+
+      @queue << [address, x, y]
+    else
+      @pending << value
+    end
+  end
+end
 
 instructions = read_instructions
 
 network_computers = (0..49).map do |address|
   input = Queue.new
-  input << address
+  input_enum = InputEnumerator.new(address, input)
   output = Queue.new
-  output_mutex = Mutex.new
-  input_mutex = Mutex.new
+  output_enum = OutputEnumerator.new(output)
+
+  input << address
 
   computer_state = ComputerState.new(
     instructions.dup,
-    proc {
-      input_mutex.synchronize do
-        input.empty? ? -1 : input.pop
-      end
-    },
-    ->(v) { output << v },
+    proc { input_enum.next },
+    ->(v) { output_enum << v },
     clock_delay: 0
   )
 
-  [
-    address,
-    NetworkComputer.new(
-      Thread.new { run_program(computer_state) },
-      input_mutex,
-      input,
-      output_mutex,
-      output
-    )
-  ]
+  [address, NetworkComputer.new(Thread.new { run_program(computer_state) }, input, output)]
 end.to_h
 
 y_255 = nil
@@ -192,7 +221,7 @@ y_255 = nil
 network_computers.each_value.map do |network_computer|
   Thread.new do
     while y_255.nil? do
-      address, x, y = Array.new(3) { network_computer.output.pop }
+      address, x, y = network_computer.output.pop
 
       if address == 255
         y_255 = y
@@ -201,10 +230,7 @@ network_computers.each_value.map do |network_computer|
       end
 
       network_computers.fetch(address).yield_self do |recipient|
-        recipient.input_mutex.synchronize do
-          recipient.input << x
-          recipient.input << y
-        end
+        recipient.input << [x, y]
       end
     end
   end
