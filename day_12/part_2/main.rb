@@ -9,6 +9,10 @@ Vector = Struct.new(:x, :y, :z) do
     self.class.new(x + other.x, y + other.y, z + other.z)
   end
 
+  def *(other)
+    self.class.new(x * other.x, y * other.y, z * other.z)
+  end
+
   def abs_max(other)
     self.class.new(*to_a.map(&:abs).zip(other.to_a.map(&:abs)).map(&:max))
   end
@@ -34,18 +38,6 @@ Moon = Struct.new(:position, :velocity) do
     new(Vector.new(values.fetch("x"), values.fetch("y"), values.fetch("z")), Vector.zero)
   end
 
-  def potential_energy
-    vector_energy(position)
-  end
-
-  def kinetic_energy
-    vector_energy(velocity)
-  end
-
-  def energy
-    potential_energy * kinetic_energy
-  end
-
   def pretty(max_pos, max_vel)
     "pos=#{position.pretty(max_pos)}, vel=#{velocity.pretty(max_vel)}"
   end
@@ -54,18 +46,15 @@ Moon = Struct.new(:position, :velocity) do
     self.class.new(position + velocity, velocity)
   end
 
-  def apply_gravity(other)
+  def apply_gravity(other, dimension)
     pos = position
     opos = other.position
 
-    self.class.new(
-      pos,
-      velocity + Vector.new(opos.x <=> pos.x, opos.y <=> pos.y, opos.z <=> pos.z)
-    )
-  end
+    # Apply the update for only a single dimension by multiplying two of three positions by zero.
+    selection = Vector.new(*([0, 0, 0].tap { |sel| sel[%w[x y z].index(dimension)] = 1 }))
+    update = Vector.new(opos.x <=> pos.x, opos.y <=> pos.y, opos.z <=> pos.z)
 
-  private def vector_energy(vector)
-    vector.to_a.map(&:abs).sum
+    self.class.new(pos, velocity + (selection * update))
   end
 end
 
@@ -83,32 +72,24 @@ def print(moons)
   moons.each { |moon| puts moon.pretty(*maxes) }
 end
 
-(0..5).each do |i|
-  (0..5).each do |j|
-    state = read_input(<<~STR)
-      <x=0, y=1, z=#{i}>
-      <x=0, y=1, z=#{j}>
-      <x=0, y=1, z=3>
-      <x=0, y=1, z=4>
-    STR
-    seen = Set.new([])
-    steps = 0
+state = read_input
 
-    loop do
-      # puts "After #{steps} steps"
-      # print(state)
+def find_repeat(dimension, state)
+  seen = Set.new([])
+  steps = 0
 
-      break if seen.include?(state)
+  until seen.include?(state)
+    p steps % 100 == 0
+    seen << state
 
-      seen << state
-
-      state = state.map do |moon|
-        (state - [moon]).reduce(moon, :apply_gravity).apply_velocity
-      end
-
-      steps += 1
+    state = state.map do |moon|
+      (state - [moon]).reduce(moon) { |l, r| l.apply_gravity(r, dimension) }.apply_velocity
     end
 
-    puts "Seen again after #{steps} steps for #{i}/#{j}"
+    steps += 1
   end
+
+  steps
 end
+
+p %w[x y z].map { |dim| find_repeat(dim, state) }.reduce(&:lcm)
